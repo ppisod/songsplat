@@ -1,0 +1,16 @@
+# Audio I/O
+soundfile>=0.12.1
+sounddevice>=0.4.6
+
+# DSP / beat detection / audio loading
+librosa>=0.10.0
+
+# ML
+torch>=2.1.0
+torchaudio>=2.1.0
+transformers>=4.35.0
+safetensors>=0.4.0
+
+# Visualization (loss charts)
+matplotlib>=3.7.0
+numpy>=1.24.0
