@@ -84,7 +84,7 @@ class _RoundedButton(tk.Canvas):
         super().__init__(master,
                          width=self._tw + padx * 2,
                          height=self._th + pady * 2,
-                         highlightthickness=0, bd=0, bg=pbg)
+                         highlightthickness=0, bd=0, bg=pbg, cursor="hand2")
         self.bind("<Enter>",     lambda _e: self._paint(self._hover))
         self.bind("<Leave>",     lambda _e: self._paint(self._bg))
         self.bind("<Button-1>",  lambda _e: command())

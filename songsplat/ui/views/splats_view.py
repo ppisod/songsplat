@@ -18,6 +18,18 @@ PRESETS = [
 ]
 
 
+def _set_bg_deep(widget, bg: str) -> None:
+    """Recursively set bg, skipping widgets tagged as color-dot indicators."""
+    if getattr(widget, "_is_color_dot", False):
+        return
+    try:
+        widget.configure(bg=bg)
+    except tk.TclError:
+        pass
+    for child in widget.winfo_children():
+        _set_bg_deep(child, bg)
+
+
 class SplatsView(BaseView):
     """List of splats with inline editor."""
 
@@ -41,7 +53,8 @@ class SplatsView(BaseView):
 
         panel = T.Card(self)
         panel.grid(row=1, column=1, sticky="nsew", padx=(8, 20), pady=(0, 20))
-        panel.grid_columnconfigure(1, weight=1)
+        panel.grid_columnconfigure(0, weight=1)
+        panel.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, minsize=280)
         self._build_panel(panel)
 
@@ -49,12 +62,21 @@ class SplatsView(BaseView):
         self._refresh()
 
     def _build_panel(self, p: T.Card) -> None:
-        T.lbl(p, "Edit Splat", bold=True, bg=T.BG2).grid(
+        # Placeholder – shown when no splat is selected
+        self._panel_placeholder = T.lbl(p, "Select a splat", dim=True, bg=T.BG2)
+        self._panel_placeholder.grid(row=0, column=0, pady=40)
+
+        # Content frame – hidden until a splat is selected
+        self._panel_frame = tk.Frame(p, bg=T.BG2)
+        self._panel_frame.grid_columnconfigure(1, weight=1)
+        f = self._panel_frame
+
+        T.lbl(f, "Edit Splat", bold=True, bg=T.BG2).grid(
             row=0, column=0, columnspan=2, padx=16, pady=(16, 12), sticky="w")
 
         def field(row, label, var):
-            T.lbl(p, label, dim=True, bg=T.BG2).grid(row=row, column=0, padx=16, pady=4, sticky="w")
-            e = T.entry(p, textvariable=var)
+            T.lbl(f, label, dim=True, bg=T.BG2).grid(row=row, column=0, padx=16, pady=4, sticky="w")
+            e = T.entry(f, textvariable=var)
             e.grid(row=row, column=1, padx=16, pady=4, sticky="ew")
             return e
 
@@ -65,25 +87,37 @@ class SplatsView(BaseView):
         field(2, "Low label",  self._low_var)
         field(3, "High label", self._high_var)
 
-        T.lbl(p, "Color", dim=True, bg=T.BG2).grid(row=4, column=0, padx=16, pady=4, sticky="w")
-        cr = tk.Frame(p, bg=T.BG2)
+        T.lbl(f, "Color", dim=True, bg=T.BG2).grid(row=4, column=0, padx=16, pady=4, sticky="w")
+        cr = tk.Frame(f, bg=T.BG2)
         cr.grid(row=4, column=1, padx=16, pady=4, sticky="w")
         self._color_dot = tk.Frame(cr, bg=self._color, width=20, height=20)
         self._color_dot.pack(side="left", padx=(0, 6))
         T.btn(cr, "Pick", self._pick_color).pack(side="left")
 
-        preset_row = tk.Frame(p, bg=T.BG2)
+        preset_row = tk.Frame(f, bg=T.BG2)
         preset_row.grid(row=5, column=0, columnspan=2, padx=16, pady=4, sticky="w")
         for c in PRESETS:
             dot = tk.Frame(preset_row, bg=c, width=18, height=18, cursor="hand2")
             dot.pack(side="left", padx=2)
             dot.bind("<Button-1>", lambda _e, col=c: self._set_color(col))
 
-        T.separator(p).grid(row=6, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
-        T.btn(p, "Save changes", self._save_edit, accent=True).grid(
+        T.separator(f).grid(row=6, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
+        T.btn(f, "Save changes", self._save_edit, accent=True).grid(
             row=7, column=0, columnspan=2, padx=16, pady=4, sticky="ew")
-        T.btn(p, "Delete splat", self._delete, danger=True).grid(
+        T.btn(f, "Delete splat", self._delete, danger=True).grid(
             row=8, column=0, columnspan=2, padx=16, pady=(4, 16), sticky="ew")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _show_panel(self) -> None:
+        self._panel_placeholder.grid_remove()
+        self._panel_frame.grid(row=0, column=0, sticky="nsew")
+
+    def _hide_panel(self) -> None:
+        self._panel_frame.grid_remove()
+        self._panel_placeholder.grid(row=0, column=0, pady=40)
 
     def _refresh(self) -> None:
         for w in self._scroll.inner.winfo_children():
@@ -103,7 +137,9 @@ class SplatsView(BaseView):
     def _make_row(self, splat: Splat) -> tk.Frame:
         row = T.Card(self._scroll.inner)
         row.configure(cursor="hand2")
-        tk.Frame(row, bg=splat.color, width=10, height=10).pack(side="left", padx=(10, 6), pady=18)
+        dot = tk.Frame(row, bg=splat.color, width=10, height=10)
+        dot._is_color_dot = True          # skip this frame in _set_bg_deep
+        dot.pack(side="left", padx=(10, 6), pady=18)
         tk.Label(row, text=splat.name, bg=T.BG2, fg=T.FG,
                  font=T.FONT_BOLD, anchor="w").pack(side="left", pady=8)
         lo = splat.low_label or "0"
@@ -124,17 +160,13 @@ class SplatsView(BaseView):
         self._low_var.set(splat.low_label)
         self._high_var.set(splat.high_label)
         self._set_color(splat.color)
+        self._show_panel()
 
     def _highlight(self) -> None:
         sid = self._selected.id if self._selected else None
         for k, row in self._rows.items():
             bg = T.BG3 if k == sid else T.BG2
-            row.configure(bg=bg)
-            for w in row.winfo_children():
-                try:
-                    w.configure(bg=bg)
-                except tk.TclError:
-                    pass
+            _set_bg_deep(row, bg)
 
     def _pick_color(self) -> None:
         color = colorchooser.askcolor(color=self._color, title="Pick color")[1]
@@ -181,9 +213,11 @@ class SplatsView(BaseView):
         self._selected = None
         self.app.mark_dirty()
         self._refresh()
+        self._hide_panel()
 
     def set_project(self, project) -> None:
         self._selected = None
+        self._hide_panel()
         self._refresh()
 
     def on_show(self) -> None:

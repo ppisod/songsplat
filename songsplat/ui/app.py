@@ -23,8 +23,8 @@ AUTOSAVE_MS = 60_000
 
 NAV_ITEMS = [
     ("Songs",   "songs"),
-    ("Label",   "label"),
     ("Splats",  "splats"),
+    ("Label",   "label"),
     ("Train",   "train"),
     ("Predict", "predict"),
     ("Export",  "export"),

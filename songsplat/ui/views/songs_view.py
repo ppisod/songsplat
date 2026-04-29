@@ -7,12 +7,21 @@ import threading
 import tkinter as tk
 import tkinter.filedialog as filedialog
 import tkinter.messagebox as messagebox
-from pathlib import Path
 from typing import Optional
 
 from songsplat.core.models import Project, Song
 from songsplat.ui.app import BaseView
 from songsplat.ui import theme as T
+
+
+def _set_bg_deep(widget, bg: str) -> None:
+    """Recursively set bg on a widget and all its descendants."""
+    try:
+        widget.configure(bg=bg)
+    except tk.TclError:
+        pass
+    for child in widget.winfo_children():
+        _set_bg_deep(child, bg)
 
 
 class SongsView(BaseView):
@@ -37,7 +46,8 @@ class SongsView(BaseView):
 
         detail = T.Card(self)
         detail.grid(row=1, column=1, sticky="nsew", padx=(8, 20), pady=(0, 20))
-        detail.grid_columnconfigure(1, weight=1)
+        detail.grid_columnconfigure(0, weight=1)
+        detail.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, minsize=280)
         self._build_detail(detail)
 
@@ -45,50 +55,69 @@ class SongsView(BaseView):
         self._refresh()
 
     def _build_detail(self, p: tk.Frame) -> None:
-        T.lbl(p, "Chunk Settings", bold=True, bg=T.BG2).grid(
+        # Placeholder – shown when no song is selected
+        self._detail_placeholder = T.lbl(p, "Select a song", dim=True, bg=T.BG2)
+        self._detail_placeholder.grid(row=0, column=0, pady=40)
+
+        # Content frame – hidden until a song is selected
+        self._detail_frame = tk.Frame(p, bg=T.BG2)
+        self._detail_frame.grid_columnconfigure(1, weight=1)
+        f = self._detail_frame
+
+        T.lbl(f, "Chunk Settings", bold=True, bg=T.BG2).grid(
             row=0, column=0, columnspan=2, padx=16, pady=(16, 8), sticky="w")
 
         def row(r, label, widget_fn):
-            T.lbl(p, label, dim=True, bg=T.BG2).grid(row=r, column=0, padx=16, pady=4, sticky="w")
+            T.lbl(f, label, dim=True, bg=T.BG2).grid(row=r, column=0, padx=16, pady=4, sticky="w")
             w = widget_fn()
             w.grid(row=r, column=1, padx=16, pady=4, sticky="ew")
             return w
 
         self._mode_var = tk.StringVar(value="fixed")
-        row(1, "Mode", lambda: T.dropdown(p, self._mode_var, ["fixed", "beat"],
+        row(1, "Mode", lambda: T.dropdown(f, self._mode_var, ["fixed", "beat"],
                                            command=self._on_mode_change))
 
         self._dur_var = tk.StringVar(value="2.0")
-        self._dur_row = tk.Frame(p, bg=T.BG2)
+        self._dur_row = tk.Frame(f, bg=T.BG2)
         self._dur_row.grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=2)
         T.lbl(self._dur_row, "Duration (s)", dim=True, bg=T.BG2).pack(side="left")
         T.entry(self._dur_row, textvariable=self._dur_var, width=8).pack(side="right")
 
         self._beats_var = tk.StringVar(value="4")
-        self._beats_row = tk.Frame(p, bg=T.BG2)
+        self._beats_row = tk.Frame(f, bg=T.BG2)
         self._beats_row.grid(row=3, column=0, columnspan=2, sticky="ew", padx=16, pady=2)
         T.lbl(self._beats_row, "Beats/chunk", dim=True, bg=T.BG2).pack(side="left")
         T.entry(self._beats_row, textvariable=self._beats_var, width=8).pack(side="right")
         self._beats_row.grid_remove()
 
-        T.separator(p).grid(row=4, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
+        T.separator(f).grid(row=4, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
 
-        self._btn_rechunk = T.btn(p, "Re-chunk Song", self._rechunk, accent=True)
+        self._btn_rechunk = T.btn(f, "Re-chunk Song", self._rechunk, accent=True)
         self._btn_rechunk.grid(row=5, column=0, columnspan=2, padx=16, pady=(4, 0), sticky="ew")
-        self._btn_rechunk.configure(state="disabled")
 
-        self._lbl_status = T.lbl(p, "", dim=True, bg=T.BG2)
+        self._lbl_status = T.lbl(f, "", dim=True, bg=T.BG2)
         self._lbl_status.grid(row=6, column=0, columnspan=2, padx=16, sticky="w")
         self._lbl_status.grid_remove()
 
-        T.separator(p).grid(row=7, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
+        T.separator(f).grid(row=7, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
 
-        self._btn_remove = T.btn(p, "Remove Song", self._remove, danger=True)
+        self._btn_remove = T.btn(f, "Remove Song", self._remove, danger=True)
         self._btn_remove.grid(row=8, column=0, columnspan=2, padx=16, pady=4, sticky="ew")
-        self._btn_remove.configure(state="disabled")
 
-        T.btn(p, "Label this song", lambda: self.app._show_view("label")).grid(
+        T.btn(f, "Label this song", lambda: self.app._show_view("label")).grid(
             row=9, column=0, columnspan=2, padx=16, pady=(4, 16), sticky="ew")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _show_detail(self) -> None:
+        self._detail_placeholder.grid_remove()
+        self._detail_frame.grid(row=0, column=0, sticky="nsew")
+
+    def _hide_detail(self) -> None:
+        self._detail_frame.grid_remove()
+        self._detail_placeholder.grid(row=0, column=0, pady=40)
 
     def _on_mode_change(self, value: str) -> None:
         if value == "fixed":
@@ -109,7 +138,9 @@ class SongsView(BaseView):
             T.lbl(self._list_scroll.inner, "No songs. Click '+ Import Songs' to begin.",
                   dim=True, wraplength=280, bg=T.BG2).pack(padx=20, pady=40)
             return
-        for song in songs:
+        for i, song in enumerate(songs):
+            if i > 0:
+                T.separator(self._list_scroll.inner).pack(fill="x", padx=4)
             row = _SongRow(self._list_scroll.inner, song, lambda s=song: self._select(s))
             row.pack(fill="x", padx=4, pady=2)
             self._rows[song.id] = row
@@ -119,8 +150,7 @@ class SongsView(BaseView):
         self._selected = song
         self.app.set_active_song(song)
         self._highlight()
-        self._btn_rechunk.configure(state="normal")
-        self._btn_remove.configure(state="normal")
+        self._show_detail()
         self._mode_var.set(song.chunk_mode)
         self._on_mode_change(song.chunk_mode)
         self._dur_var.set(str(song.chunk_duration))
@@ -132,12 +162,8 @@ class SongsView(BaseView):
     def _highlight(self) -> None:
         sid = self._selected.id if self._selected else None
         for song_id, row in self._rows.items():
-            row.configure(bg=T.BG3 if song_id == sid else T.BG2)
-            for w in row.winfo_children():
-                try:
-                    w.configure(bg=T.BG3 if song_id == sid else T.BG2)
-                except tk.TclError:
-                    pass
+            bg = T.BG3 if song_id == sid else T.BG2
+            _set_bg_deep(row, bg)
 
     def _import(self) -> None:
         if not self.project:
@@ -234,13 +260,13 @@ class SongsView(BaseView):
             return
         self.project.songs = [s for s in self.project.songs if s.id != self._selected.id]
         self._selected = None
-        self._btn_rechunk.configure(state="disabled")
-        self._btn_remove.configure(state="disabled")
+        self._hide_detail()
         self.app.mark_dirty()
         self._refresh()
 
     def set_project(self, project) -> None:
         self._selected = None
+        self._hide_detail()
         self._refresh()
 
     def on_show(self) -> None:
@@ -253,7 +279,7 @@ class _SongRow(T.Card):
     def __init__(self, master, song: Song, on_click) -> None:
         super().__init__(master)
         self.configure(cursor="hand2")
-        tk.Label(self, text="♪", bg=T.BG2, fg=T.ACCENT,
+        tk.Label(self, text="♪", bg=T.BG2, fg=T.FG,
                  font=("TkDefaultFont", 18), width=2).pack(side="left", padx=(8, 4))
         info = tk.Frame(self, bg=T.BG2)
         info.pack(side="left", fill="both", expand=True, pady=6)

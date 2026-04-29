@@ -80,17 +80,39 @@ class LabelView(BaseView):
                                        command=self._on_splat_select)
         self._splat_menu.grid(row=0, column=3, padx=4, pady=10)
 
+        # Spacer
         tk.Frame(tb, bg=T.BG2).grid(row=0, column=4, sticky="ew")
 
+        # Mode buttons
         self._btn_click = T.btn(tb, "Click", lambda: self._set_mode("click"), accent=True)
         self._btn_click.grid(row=0, column=5, padx=4, pady=10)
         self._btn_draw = T.btn(tb, "Draw", lambda: self._set_mode("draw"))
         self._btn_draw.grid(row=0, column=6, padx=(4, 12), pady=10)
 
+        # Zoom buttons
+        T.btn(tb, "−", self._zoom_out).grid(row=0, column=7, padx=(4, 2), pady=10)
+        T.btn(tb, "+", self._zoom_in).grid(row=0, column=8, padx=(2, 12), pady=10)
+
     def _set_mode(self, mode: str) -> None:
         self._mode = mode
         self._btn_click.configure(bg=T.ACCENT if mode == "click" else T.SEL)
         self._btn_draw.configure(bg=T.ACCENT if mode == "draw"  else T.SEL)
+
+    def _zoom_in(self) -> None:
+        self._zoom = min(50.0, self._zoom * 1.3)
+        self._apply_view()
+
+    def _zoom_out(self) -> None:
+        self._zoom = max(1.0, self._zoom / 1.3)
+        # Clamp pan so we don't go out of bounds
+        vf = 1.0 / self._zoom
+        self._pan_x = max(0.0, min(1.0 - vf, self._pan_x))
+        self._apply_view()
+
+    def _apply_view(self) -> None:
+        self._draw_waveform()
+        for row in self._splat_rows.values():
+            row.set_view(self._pan_x, self._zoom)
 
     def set_project(self, project) -> None:
         self._active_splat     = None
@@ -256,13 +278,15 @@ class LabelView(BaseView):
     def _wf_scroll(self, event) -> None:
         delta = -1 if (event.num == 4 or getattr(event, "delta", 0) > 0) else 1
         if event.state & 0x1:
+            # Shift + scroll → zoom
             self._zoom = max(1.0, min(50.0, self._zoom * (1.15 if delta < 0 else 0.87)))
+            vf = 1.0 / self._zoom
+            self._pan_x = max(0.0, min(1.0 - vf, self._pan_x))
         else:
-            vf         = 1.0 / self._zoom
+            # Scroll → pan left/right
+            vf = 1.0 / self._zoom
             self._pan_x = max(0.0, min(1.0 - vf, self._pan_x + delta * vf * 0.08))
-        self._draw_waveform()
-        for row in self._splat_rows.values():
-            row.set_view(self._pan_x, self._zoom)
+        self._apply_view()
 
     def _poll_playhead(self) -> None:
         self._draw_waveform()
@@ -320,7 +344,7 @@ class LabelView(BaseView):
             tf  = ck.start / self._song.duration
             if tf < self._pan_x or tf > self._pan_x + vf:
                 self._pan_x = max(0.0, min(1.0 - vf, tf - vf * 0.2))
-            self._draw_waveform()
+            self._apply_view()
             for row in self._splat_rows.values():
                 row.set_active(self._active_chunk_idx)
 
@@ -355,32 +379,44 @@ class _LabelRow(tk.Frame):
         self.grid_propagate(False)
         self.grid_columnconfigure(1, weight=1)
 
-        self._splat        = splat
-        self._song         = song
-        self._app          = app
-        self._on_click     = on_click
+        self._splat          = splat
+        self._song           = song
+        self._app            = app
+        self._on_click       = on_click
         self._on_draw_start  = on_draw_start
         self._on_draw_motion = on_draw_motion
         self._on_draw_end    = on_draw_end
-        self._get_mode     = get_mode
-        self._active_chunk = -1
-        self._pan_x        = 0.0
-        self._zoom         = 1.0
+        self._get_mode       = get_mode
+        self._active_chunk   = -1
+        self._pan_x          = 0.0
+        self._zoom           = 1.0
 
+        # ── Left info panel ──────────────────────────────────────────────
         lf = tk.Frame(self, bg=T.BG2, width=130)
-        lf.grid(row=0, column=0, sticky="ns")
-        lf.grid_propagate(False)
-        tk.Frame(lf, bg=T.ACCENT, width=8, height=8).place(x=6, y=8)
-        tk.Label(lf, text=splat.name, bg=T.BG2, fg=T.FG,
-                 font=T.FONT_BOLD, anchor="w").place(x=20, y=4)
+        lf.grid(row=0, column=0, sticky="nsew")
+        lf.pack_propagate(False)
+
+        top_row = tk.Frame(lf, bg=T.BG2)
+        top_row.pack(side="top", fill="x", padx=6, pady=(8, 0))
+        tk.Frame(top_row, bg=splat.color, width=8, height=8).pack(
+            side="left", padx=(0, 6), pady=3)
+        tk.Label(top_row, text=splat.name, bg=T.BG2, fg=T.FG,
+                 font=T.FONT_BOLD, anchor="w").pack(side="left", fill="x", expand=True)
+
         lo = splat.low_label or "0"
         hi = splat.high_label or "1"
-        tk.Label(lf, text=f"{lo} - {hi}", bg=T.BG2, fg=T.FG_DIM,
-                 font=T.FONT_SMALL, anchor="w").place(x=20, y=24)
-        tk.Button(lf, text="x", bg=T.BG2, fg=T.FG_DIM, relief="flat",
-                  font=T.FONT_SMALL, cursor="hand2", bd=0, highlightthickness=0,
-                  command=self._clear_labels).place(x=6, y=38)
+        tk.Label(lf, text=f"{lo} → {hi}", bg=T.BG2, fg=T.FG_DIM,
+                 font=T.FONT_SMALL, anchor="w").pack(
+                     side="top", fill="x", padx=6, pady=(2, 0))
 
+        clear_lbl = tk.Label(lf, text="clear", bg=T.BG2, fg=T.FG_DIM,
+                             font=T.FONT_SMALL, cursor="hand2", anchor="w")
+        clear_lbl.pack(side="bottom", fill="x", padx=6, pady=(0, 6))
+        clear_lbl.bind("<Button-1>", lambda _e: self._clear_labels())
+        clear_lbl.bind("<Enter>",    lambda _e: clear_lbl.configure(fg=T.FG))
+        clear_lbl.bind("<Leave>",    lambda _e: clear_lbl.configure(fg=T.FG_DIM))
+
+        # ── Canvas ───────────────────────────────────────────────────────
         self._cv = tk.Canvas(self, bg=T.BG, highlightthickness=0, height=ROW_H - 4)
         self._cv.grid(row=0, column=1, sticky="nsew", padx=(4, 4), pady=2)
         self._cv.bind("<Configure>",       lambda _e: self.redraw())

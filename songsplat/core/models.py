@@ -172,14 +172,25 @@ class Song:
         return [c for c in self.chunks if not c.is_labeled(splat_id)]
 
     def apply_curve_to_chunks(self, splat_id: str) -> None:
-        """Sample a drawn curve at each chunk center and write into chunk labels."""
+        """Sample a drawn curve at each chunk center and write into chunk labels.
+
+        Only chunks whose center falls within the drawn curve's time range are
+        labeled.  Chunks outside that range are left untouched so that drawing
+        a partial stroke does not silently label the whole song.
+        """
         curve = self.curves.get(splat_id)
         if curve is None:
             return
+        pts = curve.sorted_points()
+        if not pts:
+            return
+        t_min = pts[0].time
+        t_max = pts[-1].time
         for chunk in self.chunks:
-            val = curve.sample_at(chunk.center)
-            if val is not None:
-                chunk.labels[splat_id] = val
+            if t_min <= chunk.center <= t_max:
+                val = curve.sample_at(chunk.center)
+                if val is not None:
+                    chunk.labels[splat_id] = val
 
     def to_dict(self) -> dict:
         return {
